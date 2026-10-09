@@ -34,7 +34,7 @@ export interface FlightDealsStackProps extends cdk.StackProps {
  *
  *   flights.plopza.com ──HTTPS──► ticket-hub's load balancer ──► flight deals container (Fargate)
  *                                 (/admin: household sign-in)       │        │
- *                                                                   │        └──► Travelpayouts, Google Flights (SerpApi)
+ *                                                                   │        └──► Google Flights prices (SearchApi)
  *                                                                   ▼
  *                                          "flights" database on ticket-hub's database server
  *
@@ -105,17 +105,15 @@ export class FlightDealsStack extends cdk.Stack {
       description: "Signs the flight deals site's admin forms",
       generateSecretString: { passwordLength: 64, excludePunctuation: true },
     });
-    // The price services' API keys. Created empty ("not-set"); the owner
-    // pastes each key in here (Secrets Manager → Retrieve secret value →
-    // Edit). The site reads them every few minutes, so no redeploy is needed.
-    const priceKey = (id: string, secretName: string, description: string) =>
-      new secretsmanager.Secret(this, id, {
-        secretName,
-        description,
-        secretStringValue: cdk.SecretValue.unsafePlainText("not-set"),
-      });
-    const travelpayoutsToken = priceKey("TravelpayoutsToken", "flight-deals/travelpayouts-token", "Travelpayouts API token (paste it in as the whole value)");
-    const serpApiKey = priceKey("SerpApiKey", "flight-deals/serpapi-key", "SerpApi API key, for the Google Flights double-check (paste it in as the whole value)");
+    // The price service's API key (SearchApi). Created empty ("not-set");
+    // the owner pastes the key in here (Secrets Manager → Retrieve secret
+    // value → Edit). The site reads it every few minutes, so no redeploy is
+    // needed.
+    const searchApiKey = new secretsmanager.Secret(this, "SearchApiKey", {
+      secretName: "flight-deals/searchapi-key",
+      description: "SearchApi (searchapi.io) API key for Google Flights prices (paste it in as the whole value)",
+      secretStringValue: cdk.SecretValue.unsafePlainText("not-set"),
+    });
 
     // The site's entry in the household sign-in (for Admin).
     const userPool = cognito.UserPool.fromUserPoolId(this, "HouseholdSignIn", shared("user-pool-id"));
@@ -179,8 +177,7 @@ export class FlightDealsStack extends cdk.Stack {
         DB_ADMIN_DATABASE: "tickethub",
         EMAIL_FROM: `Flight Deals <${emailFrom}>`,
         SITE_TIME_ZONE: props.timeZone,
-        TRAVELPAYOUTS_SECRET: travelpayoutsToken.secretArn,
-        SERPAPI_SECRET: serpApiKey.secretArn,
+        SEARCHAPI_SECRET: searchApiKey.secretArn,
       },
       secrets: {
         DB_HOST: ecs.Secret.fromSecretsManager(dbSecret, "host"),
@@ -190,8 +187,7 @@ export class FlightDealsStack extends cdk.Stack {
         APP_SECRET: ecs.Secret.fromSecretsManager(appSecret),
       },
     });
-    travelpayoutsToken.grantRead(task.taskRole);
-    serpApiKey.grantRead(task.taskRole);
+    searchApiKey.grantRead(task.taskRole);
     // Emails go out only ever from deals@<domain>.
     task.taskRole.addToPrincipalPolicy(
       new iam.PolicyStatement({
@@ -279,7 +275,6 @@ export class FlightDealsStack extends cdk.Stack {
     });
 
     new cdk.CfnOutput(this, "SiteUrl", { value: siteUrl });
-    new cdk.CfnOutput(this, "TravelpayoutsTokenSecret", { value: travelpayoutsToken.secretName });
-    new cdk.CfnOutput(this, "SerpApiKeySecret", { value: serpApiKey.secretName });
+    new cdk.CfnOutput(this, "SearchApiKeySecret", { value: searchApiKey.secretName });
   }
 }

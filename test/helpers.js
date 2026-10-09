@@ -20,20 +20,21 @@ const TZ = "America/Chicago";
 const NOW = new Date("2026-10-09T12:00:00Z");
 const quiet = { log: () => {}, error: () => {}, warn: () => {} };
 
-/** Fake Travelpayouts: `fares[dest]` lists the round trips for that destination (any month). */
-function fakeTravelpayouts(state) {
+/**
+ * Fake SearchApi. `fares[arrival]` lists round trips for that destination;
+ * the calendar returns those inside the asked-for date window. `answers[arrival]`
+ * changes the full check's result (default: confirms, rated low).
+ */
+function fakeSearchApi(state) {
   return () => ({
-    async roundTrips({ origin, destination, month }) {
-      state.calls.push({ origin, destination, month });
+    async calendar(args) {
+      state.calls.push(args);
       if (state.fail) throw state.fail;
-      return (state.fares[destination] || []).filter((f) => f.departDate.startsWith(month));
+      const fares = (state.fares[args.arrival] || []).filter(
+        (f) => f.departDate >= args.outboundStart && f.departDate <= args.outboundEnd && f.returnDate >= args.returnStart && f.returnDate <= args.returnEnd,
+      );
+      return { fares: fares.map((f) => ({ ...f })), raw: { calendar: fares.map((f) => ({ departure: f.departDate, return: f.returnDate, price: f.price })) } };
     },
-  });
-}
-
-/** Fake Google Flights check: `answers[dest]` is the result (default: confirms at the scan's price). */
-function fakeSerpApi(state) {
-  return () => ({
     async check(args) {
       state.checks.push(args);
       const answer = state.answers[args.arrival];
@@ -48,6 +49,7 @@ function fakeSerpApi(state) {
         url: `https://www.google.com/travel/flights?test=${args.arrival}`,
         reason: null,
         searches: 2,
+        raw: { best_flights: [] },
         ...answer,
       };
     },
@@ -59,10 +61,12 @@ async function startApp() {
   await pool.query("drop schema public cascade; create schema public;");
   await migrate(pool, { log: () => {} });
   const store = createStore(pool);
+  // Enough calendar searches for every route-week in one scan.
+  await store.saveSettings({ searches_per_day: 1000 });
 
   const emails = [];
   const prices = { fares: {}, calls: [], fail: null, checks: [], answers: {} };
-  const keyValues = { travelpayouts: "tp-token", serpapi: "serp-key" };
+  const keyValues = { searchapi: "search-key" };
   const keys = { get: async (name) => keyValues[name] || null };
   const alerts = createAlerts({ store, sendEmail: async (e) => emails.push(e), siteUrl: SITE_URL, log: quiet, pauseMs: 0 });
   const scanner = createScanner({
@@ -70,8 +74,7 @@ async function startApp() {
     keys,
     alerts,
     timeZone: TZ,
-    travelpayouts: fakeTravelpayouts(prices),
-    serpapi: fakeSerpApi(prices),
+    searchapi: fakeSearchApi(prices),
     log: quiet,
     pauseMs: 0,
     now: () => NOW,
@@ -126,7 +129,7 @@ function routeFares(normal, n, extras = []) {
   for (let i = 0; i < n; i++) {
     const depart = new Date(day).toISOString().slice(0, 10);
     const ret = new Date(day + 4 * 86400000).toISOString().slice(0, 10);
-    fares.push({ departDate: depart, returnDate: ret, price: normal + (i % 5), stopsOut: 0, stopsBack: 0, airline: "AA", link: `/search/SGF${i}` });
+    fares.push({ departDate: depart, returnDate: ret, price: normal + (i % 5), stopsOut: 0, stopsBack: 0 });
     day += 7 * 86400000;
   }
   return [...fares, ...extras];

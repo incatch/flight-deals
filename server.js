@@ -8,8 +8,7 @@ const { createStore } = require("./lib/store");
 const { createSesSender, consoleSender } = require("./lib/mailer");
 const { createAlbAuth } = require("./lib/alb-auth");
 const { createKeys } = require("./lib/keys");
-const { createTravelpayouts } = require("./lib/sources/travelpayouts");
-const { createSerpApi } = require("./lib/sources/serpapi");
+const { createSearchApi } = require("./lib/sources/searchapi");
 const { createScanner } = require("./lib/scanner");
 const { createAlerts } = require("./lib/alerts");
 const { createScheduler } = require("./lib/scheduler");
@@ -28,9 +27,7 @@ async function main(env = process.env) {
 
   const keys = createKeys({
     region,
-    secrets: Object.fromEntries(
-      [["travelpayouts", env.TRAVELPAYOUTS_SECRET], ["serpapi", env.SERPAPI_SECRET]].filter(([, name]) => name),
-    ),
+    secrets: env.SEARCHAPI_SECRET ? { searchapi: env.SEARCHAPI_SECRET } : {},
   });
   const alerts = createAlerts({
     store,
@@ -42,8 +39,7 @@ async function main(env = process.env) {
     keys,
     alerts,
     timeZone,
-    travelpayouts: (token) => createTravelpayouts({ token }),
-    serpapi: (apiKey) => createSerpApi({ apiKey }),
+    searchapi: (apiKey) => createSearchApi({ apiKey }),
   });
   const auth = env.LOAD_BALANCER_ARN
     ? createAlbAuth({ trustedSigner: env.LOAD_BALANCER_ARN, keysUrl: `https://public-keys.auth.elb.${region}.amazonaws.com` })
