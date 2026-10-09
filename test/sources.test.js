@@ -78,6 +78,15 @@ test("full check: the cheapest flights out and back without overnight connection
   assert.equal(result.stopsText, "Out: 1 stop (DFW) · Back: Nonstop");
   assert.equal(result.url, googleFlightsUrl({ origin: "SGF", destination: "Las Vegas", departDate: "2026-11-12", returnDate: "2026-11-15" }));
   assert.equal(result.searches, 2);
+  // Every option looked at, cheapest first, with why it was skipped.
+  assert.deepEqual(result.options.out.map((o) => [o.price, o.stops, o.problem]), [
+    [150, "1 stop (DFW)", "an overnight connection"],
+    [170, "Nonstop", "basic economy"],
+    [199, "1 stop (DFW)", null],
+    [240, "Nonstop", null],
+  ]);
+  assert.deepEqual(result.options.back, [{ airline: "American", price: 199, stops: "Nonstop", problem: null }]);
+  assert.ok(result.raw.outbound && result.raw.back);
   assert.equal(calls[0].searchParams.get("engine"), "google_flights");
   assert.equal(calls[0].searchParams.get("exclude_basic_economy"), "true", "US trips ask Google to leave out basic economy");
   assert.equal(calls[1].searchParams.get("departure_token"), "dep-199");
@@ -90,6 +99,17 @@ test("full check: says why when nothing qualifies, and doesn't ask for exclude_b
   assert.match(result.reason, /overnight/);
   assert.equal(calls[0].searchParams.get("exclude_basic_economy"), null);
   assert.equal(calls.length, 1);
+});
+
+test("full check: flights Google shows without a price are listed, not used", async () => {
+  const { fetch } = fakeFetch([
+    { body: { best_flights: [option(214)] } },
+    { body: { best_flights: [{ ...option(null, { flights: [{ airline: "Allegiant" }] }), price: undefined }] } },
+  ]);
+  const result = await createSearchApi({ apiKey: "k", fetch }).check({ origin: "SGF", arrival: "LAS", departDate: "2026-11-09", returnDate: "2026-11-13", domestic: true });
+  assert.equal(result.ok, false);
+  assert.match(result.reason, /no price shown/);
+  assert.deepEqual(result.options.back, [{ airline: "Allegiant", price: null, stops: "Nonstop", problem: "no price shown on Google Flights" }]);
 });
 
 test("basic economy is spotted wherever Google mentions it", () => {
