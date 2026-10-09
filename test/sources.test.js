@@ -1,53 +1,54 @@
 const test = require("node:test");
 const assert = require("node:assert/strict");
-const { createTravelpayouts, aviasalesUrl, SourceError } = require("../lib/sources/travelpayouts");
-const { createSerpApi, isBasicEconomy } = require("../lib/sources/serpapi");
+const { createSearchApi, isBasicEconomy, googleFlightsUrl, dollars, SourceError } = require("../lib/sources/searchapi");
 
 function fakeFetch(responses) {
   const calls = [];
-  const fetch = async (url, options) => {
-    calls.push({ url: new URL(url), options });
+  const fetch = async (url) => {
+    calls.push(new URL(url));
     const next = responses.shift();
     return { ok: next.status === undefined || next.status < 400, status: next.status || 200, json: async () => next.body };
   };
   return { fetch, calls };
 }
 
-test("Travelpayouts: asks for round trips in a month and tidies the answer", async () => {
+const window = { outboundStart: "2026-11-09", outboundEnd: "2026-11-15", returnStart: "2026-11-11", returnEnd: "2026-11-18" };
+
+test("calendar: asks Google Flights' date grid for a week of departures and tidies the answer", async () => {
   const { fetch, calls } = fakeFetch([
     {
       body: {
-        success: true,
-        data: [
-          { price: 189.4, airline: "AA", departure_at: "2026-11-12T06:00:00-06:00", return_at: "2026-11-15T18:00:00-08:00", transfers: 1, return_transfers: 0, link: "/search/SGF1211LAS15111?t=x" },
-          { price: 210, departure_at: "2026-11-13T06:00:00-06:00" }, // no return: skipped
+        calendar: [
+          { departure: "2026-11-12", return: "2026-11-16", price: 189, is_lowest_price: true },
+          { departure: "2026-11-13", return: "2026-11-16", price: "$1,204" },
+          { departure: "2026-11-14", return: "2026-11-17", has_no_flights: true },
+          { departure: "2026-11-15", price: 99 }, // no return date: skipped
         ],
       },
     },
   ]);
-  const tp = createTravelpayouts({ token: "tok", fetch });
-  const fares = await tp.roundTrips({ origin: "SGF", destination: "LAS", month: "2026-11" });
+  const { fares } = await createSearchApi({ apiKey: "k", fetch }).calendar({ origin: "SGF", arrival: "LAS", ...window });
   assert.deepEqual(fares, [
-    { departDate: "2026-11-12", returnDate: "2026-11-15", price: 189, stopsOut: 1, stopsBack: 0, airline: "AA", link: "/search/SGF1211LAS15111?t=x" },
+    { departDate: "2026-11-12", returnDate: "2026-11-16", price: 189, stopsOut: 0, stopsBack: 0 },
+    { departDate: "2026-11-13", returnDate: "2026-11-16", price: 1204, stopsOut: 0, stopsBack: 0 },
   ]);
-  const { url, options } = calls[0];
-  assert.equal(url.searchParams.get("origin"), "SGF");
-  assert.equal(url.searchParams.get("departure_at"), "2026-11");
-  assert.equal(url.searchParams.get("one_way"), "false");
-  assert.equal(url.searchParams.get("currency"), "usd");
-  assert.equal(url.searchParams.get("token"), null, "the token goes in a header, not the address");
-  assert.equal(options.headers["x-access-token"], "tok");
+  const url = calls[0];
+  assert.equal(url.origin + url.pathname, "https://www.searchapi.io/api/v1/search");
+  assert.equal(url.searchParams.get("engine"), "google_flights_calendar");
+  assert.equal(url.searchParams.get("flight_type"), "round_trip");
+  assert.equal(url.searchParams.get("outbound_date_start"), "2026-11-09");
+  assert.equal(url.searchParams.get("outbound_date_end"), "2026-11-15");
+  assert.equal(url.searchParams.get("return_date_start"), "2026-11-11");
+  assert.equal(url.searchParams.get("return_date_end"), "2026-11-18");
+  assert.equal(url.searchParams.get("stops"), "one_stop_or_fewer");
+  assert.equal(url.searchParams.get("currency"), "USD");
 });
 
-test("Travelpayouts: a refused token is an error", async () => {
-  const { fetch } = fakeFetch([{ status: 401, body: {} }]);
-  await assert.rejects(createTravelpayouts({ token: "bad", fetch }).roundTrips({ origin: "SGF", destination: "LAS", month: "2026-11" }), (err) => err instanceof SourceError && /refused/.test(err.message));
-});
-
-test("Aviasales links get the partner ID", () => {
-  assert.equal(aviasalesUrl("/search/X?t=1", ""), "https://www.aviasales.com/search/X?t=1");
-  assert.equal(aviasalesUrl("/search/X?t=1", "123"), "https://www.aviasales.com/search/X?t=1&marker=123");
-  assert.equal(aviasalesUrl(null, "123"), null);
+test("calendar: a refused key or an error message is an error", async () => {
+  let { fetch } = fakeFetch([{ status: 401, body: { error: "Invalid API key" } }]);
+  await assert.rejects(createSearchApi({ apiKey: "bad", fetch }).calendar({ origin: "SGF", arrival: "LAS", ...window }), (err) => err instanceof SourceError && /refused/.test(err.message));
+  ({ fetch } = fakeFetch([{ body: { error: "Unsupported arrival_id" } }]));
+  await assert.rejects(createSearchApi({ apiKey: "k", fetch }).calendar({ origin: "SGF", arrival: "XXX", ...window }), /Unsupported arrival_id/);
 });
 
 const option = (price, extra = {}) => ({
@@ -58,41 +59,36 @@ const option = (price, extra = {}) => ({
   ...extra,
 });
 
-test("Google Flights: picks the cheapest flights out and back without overnight connections or basic economy", async () => {
+test("full check: the cheapest flights out and back without overnight connections or basic economy", async () => {
   const { fetch, calls } = fakeFetch([
     {
       body: {
-        search_metadata: { google_flights_url: "https://g/out" },
         price_insights: { price_level: "low", typical_price_range: [300, 450] },
         best_flights: [option(150, { layovers: [{ id: "DFW", overnight: true }] }), option(170, { flights: [{ airline: "X", travel_class: "Basic Economy" }] })],
         other_flights: [option(199, { layovers: [{ id: "DFW", duration: 60 }] }), option(240)],
       },
     },
-    {
-      body: {
-        search_metadata: { google_flights_url: "https://g/back" },
-        best_flights: [option(199, { booking_token: "b1", departure_token: undefined })],
-      },
-    },
+    { body: { best_flights: [option(199, { booking_token: "b1", departure_token: undefined })] } },
   ]);
-  const result = await createSerpApi({ apiKey: "k", fetch }).check({ origin: "SGF", arrival: "LAS", departDate: "2026-11-12", returnDate: "2026-11-15", domestic: true });
+  const result = await createSearchApi({ apiKey: "k", fetch }).check({ origin: "SGF", arrival: "LAS", destination: "Las Vegas", departDate: "2026-11-12", returnDate: "2026-11-15", domestic: true });
   assert.equal(result.ok, true);
   assert.equal(result.price, 199);
   assert.equal(result.priceLevel, "low");
+  assert.deepEqual(result.typicalRange, [300, 450]);
   assert.equal(result.stopsText, "Out: 1 stop (DFW) · Back: Nonstop");
-  assert.equal(result.url, "https://g/back");
+  assert.equal(result.url, googleFlightsUrl({ origin: "SGF", destination: "Las Vegas", departDate: "2026-11-12", returnDate: "2026-11-15" }));
   assert.equal(result.searches, 2);
-  assert.equal(calls[0].url.searchParams.get("exclude_basic"), "true", "US trips ask Google to leave out basic economy");
-  assert.equal(calls[0].url.searchParams.get("stops"), "2");
-  assert.equal(calls[1].url.searchParams.get("departure_token"), "dep-199");
+  assert.equal(calls[0].searchParams.get("engine"), "google_flights");
+  assert.equal(calls[0].searchParams.get("exclude_basic_economy"), "true", "US trips ask Google to leave out basic economy");
+  assert.equal(calls[1].searchParams.get("departure_token"), "dep-199");
 });
 
-test("Google Flights: says why when nothing qualifies, and doesn't ask for exclude_basic abroad", async () => {
+test("full check: says why when nothing qualifies, and doesn't ask for exclude_basic_economy abroad", async () => {
   const { fetch, calls } = fakeFetch([{ body: { best_flights: [option(150, { layovers: [{ id: "JFK", overnight: true }] })] } }]);
-  const result = await createSerpApi({ apiKey: "k", fetch }).check({ origin: "SGF", arrival: "LHR,LGW", departDate: "2026-11-12", returnDate: "2026-11-18", domestic: false });
+  const result = await createSearchApi({ apiKey: "k", fetch }).check({ origin: "SGF", arrival: "LHR,LGW", departDate: "2026-11-12", returnDate: "2026-11-18", domestic: false });
   assert.equal(result.ok, false);
   assert.match(result.reason, /overnight/);
-  assert.equal(calls[0].url.searchParams.get("exclude_basic"), null);
+  assert.equal(calls[0].searchParams.get("exclude_basic_economy"), null);
   assert.equal(calls.length, 1);
 });
 
@@ -100,4 +96,14 @@ test("basic economy is spotted wherever Google mentions it", () => {
   assert.equal(isBasicEconomy({ flights: [{ travel_class: "Economy", extensions: ["Basic economy: no carry-on"] }] }), true);
   assert.equal(isBasicEconomy({ extensions: ["Basic Economy"], flights: [] }), true);
   assert.equal(isBasicEconomy({ flights: [{ travel_class: "Economy", extensions: ["Wi-Fi for a fee"] }] }), false);
+});
+
+test("prices and Google Flights links", () => {
+  assert.equal(dollars("$1,204"), 1204);
+  assert.equal(dollars(189.6), 190);
+  assert.equal(dollars(null), null);
+  assert.equal(
+    googleFlightsUrl({ origin: "SGF", destination: "Las Vegas", departDate: "2026-11-12", returnDate: "2026-11-15" }),
+    "https://www.google.com/travel/flights?q=Flights%20from%20SGF%20to%20Las%20Vegas%20on%202026-11-12%20through%202026-11-15&curr=USD&hl=en",
+  );
 });

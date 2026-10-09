@@ -12,9 +12,13 @@ test("trip shapes: weekends and 4–7 night trips", () => {
   assert.equal(deals.tripShape("2026-11-10", "2026-11-18"), null); // 8 nights
 });
 
-test("months to scan: two weeks to six months ahead", () => {
-  assert.deepEqual(deals.monthsToScan("2026-10-09"), ["2026-10", "2026-11", "2026-12", "2027-01", "2027-02", "2027-03", "2027-04"]);
-  assert.deepEqual(deals.monthsToScan("2026-10-20"), ["2026-11", "2026-12", "2027-01", "2027-02", "2027-03", "2027-04"]);
+test("weeks to scan: Mondays from two weeks out, ending within six months", () => {
+  const weeks = deals.weekStarts("2026-10-09");
+  assert.equal(weeks[0], "2026-10-26");
+  assert.equal(weeks.at(-1), "2027-03-29");
+  assert.equal(weeks.length, 23);
+  assert.ok(weeks.every((w) => deals.weekday(w) === 1));
+  assert.equal(deals.weekStarts("2026-10-12")[0], "2026-10-26", "a Monday two weeks out is included");
 });
 
 test("wanted: right dates, at most one stop each way", () => {

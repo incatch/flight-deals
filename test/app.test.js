@@ -88,7 +88,7 @@ test("admin needs the household sign-in and an admin's email", async () => {
   assert.equal((await request(app.base, "/admin", { user: "someone@example.com" })).status, 403);
   const res = await request(app.base, "/admin", { user: OWNER });
   assert.equal(res.status, 200);
-  assert.match(res.body, /Travelpayouts \(prices\): <span class="good">set up/);
+  assert.match(res.body, /SearchApi \(Google Flights prices\): <span class="good">set up/);
   assert.match(res.body, /SGF · Springfield, MO<\/td><td>\d+<\/td>/);
 });
 
@@ -115,28 +115,6 @@ test("admin: settings, including the mailing address", async () => {
   assert.match(res.body, /Scan times/);
   res = await request(app.base, "/admin/settings", { user: OWNER, form: { ...form, require_check: "" } });
   assert.equal((await app.store.settings()).require_check, false);
-});
-
-test("admin: Travelpayouts' Drive script, on the home page only while it's set", async () => {
-  const page = await request(app.base, "/admin/settings", { user: OWNER });
-  const _token = formToken(page.body);
-  const settings = await app.store.settings();
-  const form = { _token, ...settings, scan_hours: settings.scan_hours.join(","), require_check: settings.require_check ? "on" : "" };
-  const snippet = `<script nowprocket data-cmp-ab="2">(function () { var script = document.createElement("script");
-    script.src = 'https://emrldtp.cc/NTgzNDg0.js?t=583484'; document.head.appendChild(script); })();</script>`;
-
-  let res = await request(app.base, "/admin/settings", { user: OWNER, form: { ...form, drive_script: snippet } });
-  assert.equal(res.status, 303);
-  assert.equal((await app.store.settings()).drive_script, "https://emrldtp.cc/NTgzNDg0.js?t=583484");
-  assert.match((await request(app.base, "/")).body, /<script async src="https:\/\/emrldtp\.cc\/NTgzNDg0\.js\?t=583484"><\/script>/);
-  assert.doesNotMatch((await request(app.base, "/s/not-a-real-token-at-all-123")).body, /emrldtp/);
-
-  res = await request(app.base, "/admin/settings", { user: OWNER, form: { ...form, drive_script: "<script src='https://evil.example/x.js'></script>" } });
-  assert.equal(res.status, 400);
-  assert.match(res.body, /look like Travelpayouts/);
-
-  await request(app.base, "/admin/settings", { user: OWNER, form: { ...form, drive_script: "" } });
-  assert.doesNotMatch((await request(app.base, "/")).body, /emrldtp/);
 });
 
 test("admin: add and change airports", async () => {
@@ -170,20 +148,40 @@ test("admin: add and change airports", async () => {
 
   // The new airport is on the sign-up form.
   assert.match((await request(app.base, "/")).body, /XNA · Fayetteville, AR/);
+
+  // A "from" airport can be removed while nobody has signed up for it...
+  await app.store.addOrigin({ code: "MCI", name: "Kansas City (test)" });
+  res = await request(app.base, "/admin/origins/MCI/delete", { user: OWNER, form: { _token } });
+  assert.equal(res.location, "/admin/airports?done=removed");
+  assert.equal(await app.store.origin("MCI"), null);
+  // ...but not once someone has.
+  await app.store.subscribe("xna-fan@example.com", "XNA");
+  res = await request(app.base, "/admin/origins/XNA/delete", { user: OWNER, form: { _token } });
+  assert.equal(res.status, 400);
+  assert.match(res.body, /XNA has 1 subscriber/);
+  assert.ok(await app.store.origin("XNA"));
 });
 
 test("admin: check a route", async () => {
   const page = await request(app.base, "/admin/check", { user: OWNER });
   const _token = formToken(page.body);
-  app.prices.fares.LAS = [{ departDate: "2026-11-12", returnDate: "2026-11-15", price: 189, stopsOut: 0, stopsBack: 1, airline: "AA", link: "/search/a" }];
+  // 4 weeks from Friday 9 Oct: the week of Monday 9 Nov.
+  app.prices.fares.LAS = [
+    { departDate: "2026-11-12", returnDate: "2026-11-16", price: 189, stopsOut: 0, stopsBack: 0 },
+    { departDate: "2026-11-10", returnDate: "2026-11-12", price: 120, stopsOut: 0, stopsBack: 0 },
+  ];
   app.prices.answers.LAS = { price: 199 };
-  const res = await request(app.base, "/admin/check", { user: OWNER, form: { _token, origin: "SGF", destination: "LAS", google: "on" } });
+  const res = await request(app.base, "/admin/check", { user: OWNER, form: { _token, origin: "SGF", destination: "LAS", weeks: "4", google: "on" } });
   assert.equal(res.status, 200);
-  assert.match(res.body, /2026-11-12 → 2026-11-15/);
-  assert.match(res.body, /\$189/);
-  assert.match(res.body, /Google Flights for 2026-11-12 → 2026-11-15:<\/strong> \$199/);
-  assert.match(res.body, /Google rates prices on this route <strong>low/);
-  assert.equal(await app.store.searchesUsed("2026-10-09"), 2);
+  assert.match(res.body, /leaving the week of 2026-11-09/);
+  assert.match(res.body, /2 round-trip prices/);
+  assert.match(res.body, /2026-11-10 → 2026-11-12<\/td><td>—<\/td><td>\$120<\/td><td><span class="muted">No/);
+  assert.match(res.body, /2026-11-12 → 2026-11-16<\/td><td>weekend<\/td><td>\$189<\/td><td>Yes/);
+  // The full check is of the cheapest trip we'd actually look at.
+  assert.match(res.body, /Full Google Flights check for 2026-11-12 → 2026-11-16:<\/strong> \$199/);
+  assert.match(res.body, /What SearchApi sent back \(date grid\)/);
+  assert.equal(await app.store.searchesUsed("2026-10-09", "calendar"), 1);
+  assert.equal(await app.store.searchesUsed("2026-10-09", "check"), 2);
 });
 
 test("admin: deals and scan now", async () => {
