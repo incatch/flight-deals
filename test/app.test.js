@@ -117,6 +117,28 @@ test("admin: settings, including the mailing address", async () => {
   assert.equal((await app.store.settings()).require_check, false);
 });
 
+test("admin: Travelpayouts' Drive script, on the home page only while it's set", async () => {
+  const page = await request(app.base, "/admin/settings", { user: OWNER });
+  const _token = formToken(page.body);
+  const settings = await app.store.settings();
+  const form = { _token, ...settings, scan_hours: settings.scan_hours.join(","), require_check: settings.require_check ? "on" : "" };
+  const snippet = `<script nowprocket data-cmp-ab="2">(function () { var script = document.createElement("script");
+    script.src = 'https://emrldtp.cc/NTgzNDg0.js?t=583484'; document.head.appendChild(script); })();</script>`;
+
+  let res = await request(app.base, "/admin/settings", { user: OWNER, form: { ...form, drive_script: snippet } });
+  assert.equal(res.status, 303);
+  assert.equal((await app.store.settings()).drive_script, "https://emrldtp.cc/NTgzNDg0.js?t=583484");
+  assert.match((await request(app.base, "/")).body, /<script async src="https:\/\/emrldtp\.cc\/NTgzNDg0\.js\?t=583484"><\/script>/);
+  assert.doesNotMatch((await request(app.base, "/s/not-a-real-token-at-all-123")).body, /emrldtp/);
+
+  res = await request(app.base, "/admin/settings", { user: OWNER, form: { ...form, drive_script: "<script src='https://evil.example/x.js'></script>" } });
+  assert.equal(res.status, 400);
+  assert.match(res.body, /look like Travelpayouts/);
+
+  await request(app.base, "/admin/settings", { user: OWNER, form: { ...form, drive_script: "" } });
+  assert.doesNotMatch((await request(app.base, "/")).body, /emrldtp/);
+});
+
 test("admin: add and change airports", async () => {
   const page = await request(app.base, "/admin/airports", { user: OWNER });
   const _token = formToken(page.body);
