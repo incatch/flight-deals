@@ -75,14 +75,14 @@ test("full check: the cheapest flights out and back without overnight connection
   assert.equal(result.price, 199);
   assert.equal(result.priceLevel, "low");
   assert.deepEqual(result.typicalRange, [300, 450]);
-  assert.equal(result.stopsText, "Out: 1 stop (DFW) · Back: Nonstop");
+  assert.equal(result.stopsText, "Out: 1 stop (DFW, 1h 0m) · Back: Nonstop");
   assert.equal(result.url, googleFlightsUrl({ origin: "SGF", destination: "Las Vegas", departDate: "2026-11-12", returnDate: "2026-11-15" }));
   assert.equal(result.searches, 2);
   // Every option looked at, cheapest first, with why it was skipped.
   assert.deepEqual(result.options.out.map((o) => [o.price, o.stops, o.problem]), [
-    [150, "1 stop (DFW)", "an overnight connection"],
+    [150, "1 stop (DFW overnight)", "a long overnight connection"],
     [170, "Nonstop", "basic economy"],
-    [199, "1 stop (DFW)", null],
+    [199, "1 stop (DFW, 1h 0m)", null],
     [240, "Nonstop", null],
   ]);
   assert.deepEqual(result.options.back, [{ airline: "American", price: 199, stops: "Nonstop", problem: null }]);
@@ -93,7 +93,7 @@ test("full check: the cheapest flights out and back without overnight connection
 });
 
 test("full check: says why when nothing qualifies, and doesn't ask for exclude_basic_economy abroad", async () => {
-  const { fetch, calls } = fakeFetch([{ body: { best_flights: [option(150, { layovers: [{ id: "JFK", overnight: true }] })] } }]);
+  const { fetch, calls } = fakeFetch([{ body: { best_flights: [option(150, { layovers: [{ id: "JFK", duration: 400, overnight: true }] })] } }]);
   const result = await createSearchApi({ apiKey: "k", fetch }).check({ origin: "SGF", arrival: "LHR,LGW", departDate: "2026-11-12", returnDate: "2026-11-18", domestic: false });
   assert.equal(result.ok, false);
   assert.match(result.reason, /overnight/);
@@ -110,6 +110,28 @@ test("full check: flights Google shows without a price are listed, not used", as
   assert.equal(result.ok, false);
   assert.match(result.reason, /no price shown/);
   assert.deepEqual(result.options.back, [{ airline: "Allegiant", price: null, stops: "Nonstop", problem: "no price shown on Google Flights" }]);
+});
+
+test("overnight connections: short ones (a red-eye's change of planes) are fine, long ones aren't", async () => {
+  const { problemWith, stopsText, minutes } = require("../lib/sources/searchapi");
+  const via = (layover) => ({ flights: [{ travel_class: "Economy" }], layovers: [layover] });
+  assert.equal(problemWith(via({ id: "DEN", duration: 65, overnight: true })), null);
+  assert.equal(problemWith(via({ id: "DEN", duration: 300, overnight: true })), "a long overnight connection");
+  assert.equal(problemWith(via({ id: "DEN", overnight: true })), "a long overnight connection", "length unknown: skipped");
+  assert.equal(problemWith(via({ id: "DEN", duration: 300 })), null, "a long daytime connection is fine");
+  assert.equal(problemWith(via({ id: "DEN", duration: 65, overnight: true }), { maxOvernightMinutes: 0 }), "a long overnight connection");
+  assert.equal(problemWith(via({ id: "DEN", duration: "1 hr 5 min", overnight: true }), { maxOvernightMinutes: 120 }), null);
+  assert.equal(stopsText(via({ id: "DEN", duration: 65, overnight: true })), "1 stop (DEN, 1h 5m overnight)");
+  assert.equal(minutes("2 hr 30 min"), 150);
+});
+
+test("calendar: leaves out basic economy on US trips", async () => {
+  const { fetch, calls } = fakeFetch([{ body: { calendar: [] } }, { body: { calendar: [] } }]);
+  const api = createSearchApi({ apiKey: "k", fetch });
+  await api.calendar({ origin: "SGF", arrival: "LAS", domestic: true, ...window });
+  await api.calendar({ origin: "SGF", arrival: "CUN", domestic: false, ...window });
+  assert.equal(calls[0].searchParams.get("exclude_basic_economy"), "true");
+  assert.equal(calls[1].searchParams.get("exclude_basic_economy"), null);
 });
 
 test("basic economy is spotted wherever Google mentions it", () => {
