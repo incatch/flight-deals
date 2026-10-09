@@ -1,0 +1,19 @@
+{
+  "name": "flight-deals",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Flight deal alerts for small airports, starting with SGF",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "test": "node --test --test-concurrency=1 \"test/*.test.js\""
+  },
+  "engines": {
+    "node": ">=22"
+  },
+  "dependencies": {
+    "@aws-sdk/client-secrets-manager": "^3.1148.0",
+    "@aws-sdk/client-sesv2": "^3.1148.0",
+    "pg": "^8.23.1"
+  }
+}

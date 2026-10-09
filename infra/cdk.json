@@ -1,0 +1,15 @@
+{
+  "app": "npx ts-node --prefer-ts-exts bin/flight-deals.ts",
+  "watch": {
+    "include": [
+      "bin/**",
+      "lib/**"
+    ]
+  },
+  "context": {
+    "@aws-cdk/core:target-partitions": [
+      "aws"
+    ],
+    "@aws-cdk/core:defaultCrossStackReferences": "strong"
+  }
+}

@@ -1,0 +1,53 @@
+# Quick safety check on pull requests: runs the site's tests, checks the AWS
+# setup compiles, and builds the container. It does not touch AWS.
+name: Check
+
+on:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  site:
+    runs-on: ubuntu-latest
+    # A throwaway PostgreSQL (same major version as on AWS) for the tests.
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_PASSWORD: test
+          POSTGRES_DB: flights_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npm ci --no-audit --no-fund
+      - name: Run the site's tests
+        run: npm test
+        env:
+          DATABASE_URL: postgres://postgres:test@127.0.0.1:5432/flights_test
+      - name: Build the site's container
+        run: docker build -t flight-deals .
+
+  infra:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: infra
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npm ci --no-audit --no-fund
+      - name: Check the AWS code compiles
+        run: npm run build

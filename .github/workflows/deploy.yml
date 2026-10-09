@@ -1,0 +1,58 @@
+# Deploys the flight deals site to AWS (the setup in infra/ and the site itself).
+# Runs by itself whenever a change is merged into main. Can also be run by
+# hand: Actions tab -> "Deploy" -> Run workflow.
+#
+# Needs ticket-hub deployed first (it publishes the shared network, load
+# balancer, database server and household sign-in) and the
+# flights-github-deploy role from ticket-hub's
+# infra/bootstrap/github-connection.yaml.
+name: Deploy
+
+on:
+  push:
+    branches: [main]
+    paths-ignore:
+      - "**.md"
+  workflow_dispatch:
+
+permissions:
+  id-token: write # lets GitHub prove to AWS who it is (no stored password)
+  contents: read
+
+# Never run two deploys at the same time; a newer one waits for the older one.
+concurrency:
+  group: deploy-production
+  cancel-in-progress: false
+
+env:
+  AWS_REGION: us-east-2
+  AWS_ACCOUNT_ID: "588580411523"
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    defaults:
+      run:
+        working-directory: infra
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Install CDK tools
+        run: npm ci --no-audit --no-fund
+
+      - name: Check the code compiles
+        run: npm run build
+
+      - name: Log in to AWS as flights-github-deploy
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: arn:aws:iam::${{ env.AWS_ACCOUNT_ID }}:role/flights-github-deploy
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Deploy to AWS
+        run: npx cdk deploy --all --require-approval never --progress events
