@@ -22,7 +22,8 @@ All prices come from **Google Flights**, through **SearchApi** (searchapi.io).
    prices on record), or at/under the destination's "Deal under $" limit.
 3. **Double-check** with a full Google Flights search for those dates (1–2
    searches): the price must still be there with no basic economy and no
-   overnight connections. Google's own "low / typical / high" rating also
+   long overnight connections (crossing midnight and over 3 hours, a
+   setting; a red-eye with a short change of planes is fine). Google's own "low / typical / high" rating also
    counts.
 4. **Email** confirmed deals right away to subscribers of that airport (at
    most 3 emails a week each, and the same route again only if it's 5%+

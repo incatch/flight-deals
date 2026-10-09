@@ -27,7 +27,7 @@ test("a scan records prices, finds the deal, double-checks it and emails subscri
   assert.equal(result.counts.confirmed, 1);
   // Every week from 2 weeks to 6 months out was asked about, for both destinations.
   assert.equal(app.prices.calls.length, 46);
-  assert.deepEqual(app.prices.calls[0], { origin: "SGF", arrival: "CUN", outboundStart: "2026-10-26", outboundEnd: "2026-11-01", returnStart: "2026-10-28", returnEnd: "2026-11-04" });
+  assert.deepEqual(app.prices.calls[0], { origin: "SGF", arrival: "CUN", domestic: false, outboundStart: "2026-10-26", outboundEnd: "2026-11-01", returnStart: "2026-10-28", returnEnd: "2026-11-04" });
   assert.equal(await app.store.searchesUsed("2026-10-09", "calendar"), 46);
   assert.equal(await app.store.searchesUsed("2026-10-09", "check"), 2);
 
@@ -38,7 +38,7 @@ test("a scan records prices, finds the deal, double-checks it and emails subscri
   assert.equal(deal.normal_price, 402);
   assert.equal(deal.status, "confirmed");
   assert.match(deal.book_url, /google\.com/);
-  assert.deepEqual(app.prices.checks[0], { origin: "SGF", arrival: "LAS", destination: "Las Vegas", departDate: "2026-12-03", returnDate: "2026-12-06", domestic: true });
+  assert.deepEqual(app.prices.checks[0], { origin: "SGF", arrival: "LAS", destination: "Las Vegas", departDate: "2026-12-03", returnDate: "2026-12-06", domestic: true, maxOvernightMinutes: 180 });
 
   assert.equal(app.emails.length, 1);
   const email = app.emails[0];

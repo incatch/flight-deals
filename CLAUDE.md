@@ -12,7 +12,8 @@
   count its searches (`store.useSearches`) and stay within Admin → Settings'
   daily limits. (Travelpayouts was tried first and had almost no US prices.)
 - The owner's rules for alerts: no basic economy ever (not even labeled),
-  no overnight connections (long flights are fine), at most one stop each
+  no long overnight connections (hours stuck in an airport overnight; a
+  red-eye with a short connection is fine, and so are long flights), at most one stop each
   way. Every email needs the mailing address, a settings link and one-click
   unsubscribe (CAN-SPAM). Nobody gets emails without confirming by click.
 - Run `npm test` (needs PostgreSQL; see README.md) before finishing.
